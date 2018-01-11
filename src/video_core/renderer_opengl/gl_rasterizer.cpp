@@ -27,7 +27,7 @@ MICROPROFILE_DEFINE(OpenGL_Drawing, "OpenGL", "Drawing", MP_RGB(128, 128, 192));
 MICROPROFILE_DEFINE(OpenGL_Blits, "OpenGL", "Blits", MP_RGB(100, 100, 255));
 MICROPROFILE_DEFINE(OpenGL_CacheManagement, "OpenGL", "Cache Mgmt", MP_RGB(100, 255, 100));
 
-RasterizerOpenGL::RasterizerOpenGL() : shader_dirty(true) {
+RasterizerOpenGL::RasterizerOpenGL() : shader_dirty(true), vertex_buffer_size(0) {
     // Clipping plane 0 is always enabled for PICA fixed clip plane z <= 0
     state.clip_distance[0] = true;
 
@@ -383,9 +383,14 @@ void RasterizerOpenGL::DrawTriangles() {
     state.Apply();
 
     // Draw the vertex batch
-    glBufferData(GL_ARRAY_BUFFER, vertex_batch.size() * sizeof(HardwareVertex), vertex_batch.data(),
-                 GL_STREAM_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, (GLsizei)vertex_batch.size());
+    GLsizeiptr target_size = vertex_batch.size() * sizeof(HardwareVertex);
+    if (vertex_buffer_size < target_size) {
+        vertex_buffer_size = target_size * 2;
+        glBufferData(GL_ARRAY_BUFFER, vertex_buffer_size, nullptr, GL_STREAM_DRAW);
+    }
+    glBufferSubData(GL_ARRAY_BUFFER, 0, target_size, vertex_batch.data());
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertex_batch.size()));
+    vertex_batch.clear();
 
     // Mark framebuffer surfaces as dirty
     // TODO: Restrict invalidation area to the viewport
@@ -397,8 +402,6 @@ void RasterizerOpenGL::DrawTriangles() {
         depth_surface->dirty = true;
         res_cache.FlushRegion(depth_surface->addr, depth_surface->size, depth_surface, true);
     }
-
-    vertex_batch.clear();
 
     // Unbind textures for potential future use as framebuffer attachments
     for (unsigned texture_index = 0; texture_index < pica_textures.size(); ++texture_index) {
